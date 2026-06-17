@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/png" sizes="32x32" href="icons/icon32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="icons/icon16.png">
-  <title>New Tab</title>
+  <title>New Tab Photo Gallery</title>
   <style>
     body,
     html {
@@ -77,6 +77,75 @@
       color: rgba(255, 255, 255, 0.9);
     }
 
+    .source-actions {
+      display: flex;
+      align-items: stretch;
+      gap: 8px;
+    }
+
+    .source-button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      width: 34px;
+      height: 34px;
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 34px;
+      cursor: pointer;
+      background: rgba(255, 255, 255, 0.92);
+      color: #111;
+      transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .source-button:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+    }
+
+    .source-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.4;
+      box-shadow: none;
+    }
+
+    .source-button.active {
+      background: rgba(255, 255, 255, 0.92);
+      color: #111;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+    }
+
+    .source-button svg {
+      width: 17px;
+      height: 17px;
+      stroke: currentColor;
+    }
+
+    .source-path {
+      flex: 1;
+      min-width: 0;
+      min-height: 34px;
+      max-height: 74px;
+      box-sizing: border-box;
+      resize: none;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      font: 12px/1.35 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    }
+
+    .source-path::placeholder {
+      color: rgba(255, 255, 255, 0.45);
+    }
+
+    .source-path:focus {
+      outline: none;
+      border-color: rgba(255, 255, 255, 0.48);
+      background: rgba(255, 255, 255, 0.14);
+    }
+
     /* ── Settings panel ── */
     #photo-controls {
       position: fixed;
@@ -87,7 +156,7 @@
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 14px;
       padding: 16px 18px;
-      width: 228px;
+      width: 272px;
       backdrop-filter: blur(20px);
       display: none;
       flex-direction: column;
@@ -98,12 +167,17 @@
       display: flex;
     }
 
+    .settings-section {
+      display: grid;
+      gap: 9px;
+    }
+
     .ctrl-label {
       font-size: 10px;
       font-weight: 500;
       color: rgba(255, 255, 255, 0.4);
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 0;
       margin-bottom: 3px;
     }
 
@@ -174,10 +248,25 @@
         <span class="ctrl-val" id="val-angle">0°</span>
       </div>
     </div>
+    <div class="settings-section">
+      <div class="ctrl-label">Photos</div>
+      <div class="source-actions">
+        <button id="photo-source-folder" class="source-button active" type="button" aria-pressed="true" aria-label="Read folder" title="Read folder">
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 16V4"></path>
+            <path d="M7 9l5-5 5 5"></path>
+            <path d="M5 20h14"></path>
+          </svg>
+        </button>
+        <textarea id="photo-source-path" class="source-path" rows="1" placeholder="Folder path" aria-label="Folder path"></textarea>
+      </div>
+      <input id="photo-source-folder-input" type="file" accept="image/*" multiple webkitdirectory hidden>
+    </div>
   </div>
 
   <script defer src="index.js"></script>
   <script defer src="photos.js"></script>
+  <script defer src="localphotos.js"></script>
 </body>
 
 </html>

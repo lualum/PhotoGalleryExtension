@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Happy Mother's Day! (5/10/2026)",
-  "description": "Blank Tab with clock, date, battery info, and infinite photo plane",
+  "name": "New Tab Photo Gallery",
+  "description": "A new tab photo gallery with clock, date, battery info, and a local photo plane",
   "version": "0.1.0",
   "permissions": [
     "storage"
