@@ -99,39 +99,100 @@
 		if (bitmap && typeof bitmap.close === "function") bitmap.close();
 	}
 
+	function bitmapCanDraw(bitmap) {
+		try {
+			return Boolean(bitmap && bitmap.width > 0 && bitmap.height > 0);
+		} catch {
+			return false;
+		}
+	}
+
+	function bitmapIsVisible(bitmap) {
+		return tiles.some((tile) => tile.bmp === bitmap);
+	}
+
+	function cacheHasBitmap(bitmap) {
+		for (const cachedBitmap of cache.values()) {
+			if (cachedBitmap === bitmap) return true;
+		}
+		return false;
+	}
+
+	function removeCachedBitmap(bitmap) {
+		for (const [key, cachedBitmap] of cache) {
+			if (cachedBitmap === bitmap) cache.delete(key);
+		}
+	}
+
+	function discardBitmap(bitmap) {
+		if (!bitmap) return;
+		removeCachedBitmap(bitmap);
+		closeBitmap(bitmap);
+	}
+
+	function releaseBitmapIfUnused(bitmap) {
+		if (!bitmap || bitmapIsVisible(bitmap) || cacheHasBitmap(bitmap)) return;
+		closeBitmap(bitmap);
+	}
+
+	function clearTiles() {
+		const tileBitmaps = new Set();
+		for (const tile of tiles) {
+			if (tile.bmp) tileBitmaps.add(tile.bmp);
+			tile.bmp = null;
+		}
+		tiles = [];
+		for (const bitmap of tileBitmaps) releaseBitmapIfUnused(bitmap);
+	}
+
 	function clearCache() {
 		for (const bitmap of cache.values()) closeBitmap(bitmap);
 		cache.clear();
 	}
 
+	function evictOldestBitmap() {
+		const oldestKey = cache.keys().next().value;
+		// The bitmap may still be held by an active tile or prewarm batch.
+		if (oldestKey !== undefined) cache.delete(oldestKey);
+	}
+
 	function rememberBitmap(cacheKey, bitmap) {
 		if (cache.size >= CACHE_MAX) {
-			const oldestKey = cache.keys().next().value;
-			closeBitmap(cache.get(oldestKey));
-			cache.delete(oldestKey);
+			evictOldestBitmap();
 		}
 
 		cache.set(cacheKey, bitmap);
 		return bitmap;
 	}
 
+	function getCachedBitmap(cacheKey) {
+		const bitmap = cache.get(cacheKey);
+		if (!bitmap) return null;
+		if (bitmapCanDraw(bitmap)) return bitmap;
+		discardBitmap(bitmap);
+		return null;
+	}
+
 	async function getBitmap(source) {
 		if (!source) throw new Error("No photo source available.");
 
 		if (source.kind === "file") {
-			if (cache.has(source.key)) return cache.get(source.key);
+			const cachedBitmap = getCachedBitmap(source.key);
+			if (cachedBitmap) return cachedBitmap;
 			return rememberBitmap(source.key, await createImageBitmap(source.file));
 		}
 
 		if (source.kind === "fileHandle") {
 			const file = await source.handle.getFile();
 			const cacheKey = `${source.key}:${file.size}:${file.lastModified}`;
-			if (cache.has(cacheKey)) return cache.get(cacheKey);
+			const cachedBitmap = getCachedBitmap(cacheKey);
+			if (cachedBitmap) return cachedBitmap;
 			return rememberBitmap(cacheKey, await createImageBitmap(file));
 		}
 
 		if (source.kind === "fileUrl") {
-			if (cache.has(source.key)) return cache.get(source.key);
+			const cachedBitmap = getCachedBitmap(source.key);
+			if (cachedBitmap) return cachedBitmap;
 			const response = await fetch(source.url);
 			if (!response.ok) throw new Error(`Missing referenced photo ${source.path || source.url}.`);
 			const blob = await response.blob();
@@ -148,7 +209,9 @@
 			const source = nextSource();
 			if (!source) break;
 			try {
-				return await getBitmap(source);
+				const bitmap = await getBitmap(source);
+				if (bitmapCanDraw(bitmap)) return bitmap;
+				discardBitmap(bitmap);
 			} catch {
 				// Skip unreadable sources.
 			}
@@ -182,13 +245,13 @@
 		activeSources = usableSources;
 		sourceVersion++;
 		cancelAnimationFrame(raf);
-		tiles = [];
+		clearTiles();
 		hoveredTile = null;
 		clearCache();
 		resetPool();
 		hasRevealed = false;
 		canvas.style.opacity = "0";
-		respawnAll();
+		startRespawnAll();
 	}
 
 	window.MotherDayPhotoPlane = {
@@ -256,7 +319,7 @@
 	}
 	window.addEventListener("resize", () => {
 		resize();
-		respawnAll();
+		startRespawnAll();
 	});
 	resize();
 
@@ -269,6 +332,7 @@
 	}
 
 	function applyBitmapToTile(t, bmp) {
+		if (!bitmapCanDraw(bmp)) throw new Error("Photo bitmap is not drawable.");
 		const d = Math.random();
 		const sz = 80 + d * (80 * sizeVar - 80);
 		const aspectRatio = bmp.width / bmp.height || 1;
@@ -356,7 +420,9 @@
 		try {
 			const bmp = await nextBitmap();
 			if (version !== sourceVersion) return;
+			const previousBitmap = t.bmp;
 			applyBitmapToTile(t, bmp);
+			if (previousBitmap !== bmp) releaseBitmapIfUnused(previousBitmap);
 			placeTileAboveStream(t);
 			t.hoverScale = 1;
 			t.hoverAlpha = null;
@@ -371,7 +437,7 @@
 		const version = sourceVersion;
 		const respawnId = ++respawnVersion;
 		cancelAnimationFrame(raf);
-		tiles = [];
+		clearTiles();
 		hoveredTile = null;
 
 		const initial = await prewarm(Math.min(densityVal, 20));
@@ -390,23 +456,36 @@
 		for (let i = 0; i < 20; i++) nextBitmap().catch(() => {});
 	}
 
+	function startRespawnAll() {
+		respawnAll().catch(() => {
+			canvas.style.opacity = "1";
+		});
+	}
+
 	function drawRounded(bmp, x, y, w, h, r, a) {
+		if (!bitmapCanDraw(bmp)) return false;
 		ctx.save();
-		ctx.globalAlpha = a;
-		ctx.beginPath();
-		ctx.moveTo(x + r, y);
-		ctx.lineTo(x + w - r, y);
-		ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-		ctx.lineTo(x + w, y + h - r);
-		ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-		ctx.lineTo(x + r, y + h);
-		ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-		ctx.lineTo(x, y + r);
-		ctx.quadraticCurveTo(x, y, x + r, y);
-		ctx.closePath();
-		ctx.clip();
-		ctx.drawImage(bmp, x, y, w, h);
-		ctx.restore();
+		try {
+			ctx.globalAlpha = a;
+			ctx.beginPath();
+			ctx.moveTo(x + r, y);
+			ctx.lineTo(x + w - r, y);
+			ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+			ctx.lineTo(x + w, y + h - r);
+			ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+			ctx.lineTo(x + r, y + h);
+			ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+			ctx.lineTo(x, y + r);
+			ctx.quadraticCurveTo(x, y, x + r, y);
+			ctx.closePath();
+			ctx.clip();
+			ctx.drawImage(bmp, x, y, w, h);
+			return true;
+		} catch {
+			return false;
+		} finally {
+			ctx.restore();
+		}
 	}
 
 	const LERP_IN = 0.08;
@@ -424,6 +503,7 @@
 
 		hoveredTile = null;
 		for (const t of sorted) {
+			if (!t.bmp) continue;
 			const scaledW = t.w * t.hoverScale;
 			const scaledH = t.h * t.hoverScale;
 			const ox = t.x - (scaledW - t.w) / 2;
@@ -476,12 +556,20 @@
 			: sorted;
 
 		for (const t of drawOrder) {
+			if (!t.bmp) {
+				respawnTop(t);
+				continue;
+			}
 			const scaledW = t.w * t.hoverScale;
 			const scaledH = t.h * t.hoverScale;
 			const ox = t.x - (scaledW - t.w) / 2;
 			const oy = t.y - (scaledH - t.h) / 2;
 			const drawAlpha = t.hoverAlpha !== null ? t.hoverAlpha : t.alpha;
-			drawRounded(t.bmp, ox, oy, scaledW, scaledH, 10 * t.hoverScale, drawAlpha);
+			if (!drawRounded(t.bmp, ox, oy, scaledW, scaledH, 10 * t.hoverScale, drawAlpha)) {
+				discardBitmap(t.bmp);
+				t.bmp = null;
+				respawnTop(t);
+			}
 		}
 
 		if (!hasRevealed && tiles.length > 0) {
@@ -525,7 +613,7 @@
 			document.getElementById("val-angle").textContent = `${Math.round(r.angle)}°`;
 		}
 		resetPool();
-		respawnAll();
+		startRespawnAll();
 	});
 
 	function bindSlider(id, valId, setter, fmt) {
@@ -549,7 +637,7 @@
 		"val-density",
 		(v) => {
 			densityVal = Math.round(v);
-			respawnAll();
+			startRespawnAll();
 		},
 		(v) => Math.round(v),
 	);
