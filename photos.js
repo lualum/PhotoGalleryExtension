@@ -453,7 +453,7 @@
 		}
 
 		loop();
-		for (let i = 0; i < 20; i++) nextBitmap().catch(() => {});
+		for (let i = 0; i < 20; i++) nextBitmap().catch(() => { });
 	}
 
 	function startRespawnAll() {
